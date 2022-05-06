@@ -5,9 +5,16 @@ STUDENT : MUHAMMAD BILAL
 SECTION : 04
 HOMEWORK: 03
 ----------
-PROBLEMS:
+PROBLEMS: I'm only able to use the vertex function if the center is origin, otherwise, the program creates problem. Like it's unable to give the enemy transformation if the center is not origin
 ----------
 ADDITIONAL FEATURES:
+//background sinosoidal effect of two circles (one sin, and the other cos)
+//random color for decoration
+//increase/decrease speed of the enemy
+//Red light reflection on the boundaries
+
+//ADDITIONAL NOTES:
+//kindly run the progrma on x86 version, and change the gL to GL (for you).
 *********/
 
 #ifdef _MSC_VER
@@ -26,56 +33,91 @@ ADDITIONAL FEATURES:
 #define TIMER_ON         1 // 0:disable timer, 1:enable timer
 #define D2R 0.0174532
 #define SIZE 20
-#define ENEMYPSEED 20
+
 #include <time.h>
-//game concept
- //PACMAN AND MONSTER (the chasing object will be monster, while the mouse position will be a pacman (make a cute pacman like object)
-
-//rotate the eyes of the monster
-
-
-
-
-
 //structures
-
 
 typedef struct
 {
     float r, g, b;
-}RGB_t;
+}RGB_t;  //color strcuture
 
 typedef struct
 {
     vec_t MonsterCenter;
-    vec_t pos;
+    vec_t velocity; //for velocity
+    vec_t pos; //for changing the pos
+    RGB_t color;
+    bool visible;
     double angle;
 
 }Enemy_t;
+vec_t temp;
+
+typedef struct {
+    vec_t pos;
+    vec_t N;
+} pointsonBoundary;  //structure for reflection
+
+typedef struct
+{
+    vec_t velocity; //for velocity
+    vec_t pos;
+    vec_t newpos;
+    double bulletradius;
+}bullet;
+bullet fire;
 //Variable declarations
 double boundaryX, boundaryY, Width, Height;
 vec_t Character;
+vec_t tempVel;
 Enemy_t ene;
 RGB_t gra;
 RGB_t title;
 double radius = 30;
 double yfactor = 0;
 double factor = 0;
+double lastangle;
 bool visible = false;
 const char* INSIDE = "Inside";
 const char* OUTSIDE = "Outside";
 bool pause = false;
-
-
+int ENEMYPSEED = 5;
+bool bulletappear = false;
+float A = 100, //amplitude
+fq = 1,  //frequency
+C = 0,   //horizontal phase shift
+B = 0;   //vertical phase shift
+float angle = boundaryX;
 
 /* Global Variables for Template File */
 bool up = false, down = false, right = false, left = false;
 int  winWidth, winHeight; // current Window width and height
-
+bool initialmode=false;
 //
 // to draw circle, center at (x,y)
 // radius r
 //
+
+RGB_t mulColor(float k, RGB_t c) {
+    RGB_t tmp = { k * c.r, k * c.g, k * c.b };  //multiplies the color
+    return tmp;
+}
+
+RGB_t addColor(RGB_t c1, RGB_t c2) {  //add the two colors
+    RGB_t tmp = { c1.r + c2.r, c1.g + c2.g, c1.b + c2.b };
+    return tmp;
+}
+double distanceImpact(double d) {  //calculates the distance
+    return (-1.0 / 400) * d + 1.0;  //assuming that after the distance of 400, the color doesnt appear
+}
+RGB_t calculateColor(Enemy_t ene, pointsonBoundary p)  //calculates color on each boundary
+{
+    vec_t L = subV(ene.pos, p.pos);
+    vec_t unitL = unitV(L);
+    float factor = dotP(unitL, p.N) * distanceImpact(magV(L));  //distance impact checks how far the object is from the wall
+    return mulColor(factor, ene.color);  //enemy color is red, and it depends on the factor!
+}
 void circle(int x, int y, int r)
 {
 #define PI 3.1415
@@ -178,7 +220,7 @@ void Boundary(float x, float y, float width, float height, float r, float g, flo
 //
 // To display onto window using OpenGL commands
 //
-void displayState()
+void displayState()  //displays the state of the game, and all the strings
 {
     glColor3f(1, 1, 1);
        vprint(boundaryX, boundaryY - Height - 50, GLUT_BITMAP_HELVETICA_18, "%s", "Mouse is ");
@@ -197,7 +239,7 @@ void displayState()
 
     }
 
-    glColor3f(title.g, title.b, title.r);
+    glColor3f(title.g, title.b, title.b);
     if (!pause)
     {
         vprint(boundaryX + 400, boundaryY - Height - 50, GLUT_BITMAP_HELVETICA_18, "Press Spacebar to Pause");
@@ -211,11 +253,13 @@ void displayState()
     }
 
     glColor3f(1, 1, 1);
-    vprint(boundaryX + 900, boundaryY - Height - 50, GLUT_BITMAP_HELVETICA_18, "Angle: %0.0f", ene.angle);
+    vprint(boundaryX + 900, boundaryY - Height - 50, GLUT_BITMAP_HELVETICA_18, "Angle:" );
+    glColor3f(title.r, title.g, title.r);
+    vprint(boundaryX + 960, boundaryY - Height - 50, GLUT_BITMAP_HELVETICA_18, "%0.0f", ene.angle);
 
 
 }
-void ChangeColor(RGB_t *title)
+void ChangeColor(RGB_t *title)  //random color
 {
     title->r = rand() % 255;
     title->g = rand() % 150;
@@ -225,8 +269,13 @@ void ChangeColor(RGB_t *title)
     title->b = title->b / 255.0f;
 
 }
-
-void FollowPlayer()
+float fsin(float x) {  //give sinosuidal movement to the background
+    return A * sin((fq * x + C) * D2R) + B;
+}
+float fcos(float x) {  //give sinosuidal movement to the background
+    return A * cos((fq * x + C) * D2R) + B;
+}
+void FollowPlayer()  //follows player function
 {
 
     ene.angle = atan2(Character.y, Character.x) / D2R ;
@@ -235,19 +284,41 @@ void FollowPlayer()
     {
         ene.angle += 360;
     }
-    ene.pos = addV(ene.pos, pol2rec({ ENEMYPSEED, ene.angle }));  //this adds the vector, and is used for transformation
+    if (visible == true)
+    {
+        ene.velocity = mulV(ENEMYPSEED, unitV(subV(Character, ene.pos))); //finding the unit vector of speed
+        ene.pos = addV(ene.pos, ene.velocity);//adding the ene.velocity to ene.pos
+        temp = ene.pos;
+        tempVel = ene.velocity;
+        lastangle = ene.angle;
 
-    if (ene.MonsterCenter.x + radius > boundaryX+Width || ene.MonsterCenter.x + radius < boundaryX) {  //for reflection
-        ene.pos.x *= -1;
-    }
 
-    if (ene.MonsterCenter.y + radius > boundaryY || ene.MonsterCenter.y + radius < boundaryY-Height) {
-        ene.pos.y *= -1;
+        //bullets
+       
+
     }
+    else
+    {
+        //check for bounce off tomorrow
+       
+        if (ene.pos.x + radius >= boundaryX + Width  || ene.pos.x - radius <= boundaryX ) {  //for reflection
+            ene.velocity.x *= -1;
+        }
+
+        if (ene.pos.y + radius >= boundaryY  || ene.pos.y - radius <= boundaryY - Height) {
+            ene.velocity.y *= -1;  //for bouncing off the ball
+        }
+
+        ene.angle = lastangle;  //last angle
+        ene.pos = addV(ene.pos, ene.velocity);
+    }
+  
+  //add light intensity
+   
    
  
 }
-void drawMonster()
+void drawMonster()  //draw the monster
 {
     double angle = (ene.angle) * D2R;
    
@@ -306,6 +377,78 @@ void drawMonster()
     circle(ene.MonsterCenter.x - 11 + ene.pos.x, ene.MonsterCenter.y + 6 + ene.pos.y, 3);  //rotating the circles
     circle(ene.MonsterCenter.x + 17 + ene.pos.x, ene.MonsterCenter.y + 6 + ene.pos.y, 3);
    
+  
+}
+void colorReflection()
+{
+    for (int x = boundaryX; x < boundaryX + Width; x++)
+    {
+        pointsonBoundary p = { {x, -320}, {0,1} }; //each point
+
+        RGB_t color = { 0, 0, 0 }; //assuming that the initial color is black
+        color = addColor(color, calculateColor(ene, p));  //only one color
+
+        glBegin(GL_LINES);
+        //from the surface
+        glColor3f(color.r, color.g, color.b);  //surface has black color
+        glVertex2f(x, -320);
+        //to the bottom
+        glColor3f(0, 0, 0);  //bottom has black color!
+        glVertex2f(x, -340);
+        glEnd();
+    }
+    for (int x = boundaryX; x < boundaryX + Width; x++)
+    {
+        pointsonBoundary p = { {x, boundaryY}, {0,-1} }; //each point  (this points downwards)
+
+        RGB_t color = { 0, 0, 0 }; //assuming that the initial color is black
+        color = addColor(color, calculateColor(ene, p));  //only one color
+
+        glBegin(GL_LINES);
+        //from the surface
+        glColor3f(color.r, color.g, color.b);  //surface has black color
+        glVertex2f(x, boundaryY);
+        //to the bottom
+        glColor3f(0, 0, 0);  //bottom has black color!
+        glVertex2f(x, boundaryY + 20);
+        glEnd();
+    }
+
+    for (int y = boundaryY; y > boundaryY-Height; y--)
+    {
+        pointsonBoundary p = { {boundaryX, y}, {1,0} }; //each point  (this points downwards)
+
+        RGB_t color = { 0, 0, 0 }; //assuming that the initial color is black
+        color = addColor(color, calculateColor(ene, p));  //only one color
+
+        glBegin(GL_LINES);
+        //from the surface
+        glColor3f(color.r, color.g, color.b);  //surface has black color
+        glVertex2f(boundaryX, y);
+        //to the bottom
+        glColor3f(0, 0, 0);  //bottom has black color!
+        glVertex2f(boundaryX-20, y);
+        glEnd();
+    }
+
+    for (int y = boundaryY; y > boundaryY - Height; y--)
+    {
+        pointsonBoundary p = { {boundaryX + Width, y}, {-1,0} }; //each point  (this points downwards)
+
+        RGB_t color = { 0, 0, 0 }; //assuming that the initial color is black
+        color = addColor(color, calculateColor(ene, p));  //only one color
+
+        glBegin(GL_LINES);
+        //from the surface
+        glColor3f(color.r, color.g, color.b);  //surface has black color
+        glVertex2f(boundaryX + Width, y);
+        //to the bottom
+        glColor3f(0, 0, 0);  //bottom has black color!
+        glVertex2f(boundaryX + Width+ 20, y);
+        glEnd();
+    }
+
+
 
 }
 void display() {
@@ -317,17 +460,36 @@ void display() {
     
     glColor3f(title.r,title.g, title.b);
     vprint(-150, boundaryY + 40, GLUT_BITMAP_TIMES_ROMAN_24, "PACMAN, EAT THE PLAYER!");
-    Boundary(boundaryX, boundaryY, Width, Height, gra.r, gra.g, gra.b);
+    vprint(-680, boundaryY + 50, GLUT_BITMAP_HELVETICA_18, "<F1> : increase the speed");
+    vprint(-680, boundaryY + 30, GLUT_BITMAP_HELVETICA_18, "<F2> : decrease the speed");
+
+    Boundary(boundaryX, boundaryY, Width, Height, gra.r, gra.g, gra.b);  //it's the boundary 
+ 
+   
     glColor4f(0, 0, 1, 0.5);
     if (visible)
     {
-        circle(Character.x, Character.y, 20);
+        circle(Character.x, Character.y, 20);  //displays circle
         glColor3f(1, 1, 1);
     }
-    displayState();
-    drawMonster();
+    displayState();  //displays the state
+    glColor3f(title.r, title.g, title.r);
+
+    circle(angle, fsin(angle)+ boundaryY-120, 5);  //random background decoration
+    circle(angle, fcos(angle) + boundaryY - 500, 5); 
+
+   
+    if (ene.visible)  //if enemy is visisble, then make it appear, and do the reflection
+    {
+        drawMonster();
+        colorReflection();
+
+    }
+   
 
     
+
+    //add some extra functionality!! 
 
     glutSwapBuffers();
 }
@@ -372,6 +534,25 @@ void onSpecialKeyDown(int key, int x, int y)
     case GLUT_KEY_RIGHT: right = true; break;
     }
 
+    if (key == GLUT_KEY_F1)
+    {
+        if (ENEMYPSEED < 15)
+        {
+            ENEMYPSEED++;  //increases the speed
+
+        }
+    }
+
+    if (key == GLUT_KEY_F2)
+    {
+        if (ENEMYPSEED > 5)
+        {
+            ENEMYPSEED--;
+
+        }
+    }
+
+   
     // to refresh the window it calls display() function
     glutPostRedisplay();
 }
@@ -404,8 +585,6 @@ void onSpecialKeyUp(int key, int x, int y)
 void onClick(int button, int stat, int x, int y)
 {
     // Write your codes here.
-
-
 
     // to refresh the window it calls display() function
     glutPostRedisplay();
@@ -444,9 +623,10 @@ void onMoveDown(int x, int y) {
 void onMove(int x, int y) {
     // Write your codes here.
 
-    Character.x = x - winWidth / 2;
+    Character.x = x - winWidth / 2;   //change of coordinates
     Character.y = winHeight / 2 - y;
-
+    fire.pos.x = Character.x;
+    fire.pos.y = Character.y;
    
     glutPostRedisplay();
 }
@@ -458,7 +638,8 @@ void onTimer(int v) {
     // Write your codes here.
     if (Character.x > boundaryX && Character.x < boundaryX + Width && Character.y < boundaryY && Character.y > boundaryY - Height)  //checking the boundary of the mouse
     {
-        visible = true;
+        visible = true;   //checks if mouse is inside or outside
+        initialmode = true;
     }
     else
     {
@@ -466,12 +647,23 @@ void onTimer(int v) {
 
     }
     ChangeColor(&title);
-    
-  
-    if (pause == false)
+    if (pause == false)   //if pause==false, followplayer
     {
         FollowPlayer();
 
+    }
+    //bullets
+
+    if (!pause)
+    {
+        angle += 5;  //angle increment
+    }
+  
+   
+
+    if (angle > boundaryX + Width)
+    {
+        angle = boundaryX;
     }
     // to refresh the window it calls display() function
     glutPostRedisplay(); // display()
@@ -493,10 +685,11 @@ void Init() {
     gra.b = 0.8;
     Character.x = -1000;  //outside the bounds of the window for now
     Character.y = 1000;
-    ene.MonsterCenter.x = 0;
-    ene.MonsterCenter.y = 0;
-
-    ene.angle = 45 ;
+    ene.velocity.x = 0;
+    ene.velocity.y = 0;
+    fire.bulletradius = 5;
+    ene.color = { 1,0,0 };
+    ene.visible = true;
     srand(time(NULL));
 }
 
